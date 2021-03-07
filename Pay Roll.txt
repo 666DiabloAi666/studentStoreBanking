@@ -1,0 +1,16 @@
+ var name, hrs, rate = 120, otrate = 150, othrs, bpay, otpay, gpay, ded, npay
+    name = prompt("Enter your name")
+    hrs = prompt("Enter hours worked")
+
+    othrs = 
+    bpay = hrs * rate
+    otpay = othrs * otrate
+    gpay = bpay + otpay
+    ded = bpay * .10
+    npay = gpay - ded
+
+    if (hrs < 40) {
+    hrs = 40
+    }
+
+    alert("Name: " + name + "\nNo. of hours worked: " + hrs + "\nNo. of overtime hours: " + othrs + "\nBasic pay: " + bpay + "\nOvertime pay: " + otpay + "\nGross pay: " + gpay + "\nDeduction: " + ded + "\nNet pay: " + npay)
