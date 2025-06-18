@@ -1,0 +1,282 @@
+Here is a complete Android AppAuth integration template to guide you through building a full OAuth 2.0/OpenID Connect client app. It includes:
+
+Manifest setup
+
+Auth flow
+
+Token exchange
+
+Persistent storage
+
+Logout support
+
+Secure browser handling (Custom Tabs)
+
+
+
+---
+
+📁 File Structure Overview
+
+app/
+├── java/com/example/appauthdemo/
+│   ├── MainActivity.java
+│   ├── AuthStateManager.java
+│   ├── LoginActivity.java
+│   ├── TokenActivity.java
+│   └── LogoutActivity.java
+├── res/layout/
+│   ├── activity_main.xml
+│   ├── activity_login.xml
+│   ├── activity_token.xml
+│   └── activity_logout.xml
+└── AndroidManifest.xml
+
+
+---
+
+✅ build.gradle (app)
+
+dependencies {
+    implementation 'net.openid:appauth:0.11.1' // Replace with latest
+}
+
+
+---
+
+✅ AndroidManifest.xml
+
+<manifest ...>
+  <application ...>
+    <!-- AppAuth Redirect URI handler -->
+    <activity
+      android:name="net.openid.appauth.RedirectUriReceiverActivity"
+      tools:node="replace">
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="com.example.app" />
+      </intent-filter>
+    </activity>
+
+    <!-- Your Activities -->
+    <activity android:name=".MainActivity" />
+    <activity android:name=".LoginActivity" />
+    <activity android:name=".TokenActivity" />
+    <activity android:name=".LogoutActivity" />
+  </application>
+</manifest>
+
+
+---
+
+✅ LoginActivity.java
+
+Handles authorization via browser:
+
+public class LoginActivity extends AppCompatActivity {
+    private static final String AUTH_ENDPOINT = "https://idp.example.com/auth";
+    private static final String TOKEN_ENDPOINT = "https://idp.example.com/token";
+    private static final String CLIENT_ID = "your-client-id";
+    private static final Uri REDIRECT_URI = Uri.parse("com.example.app:/oauth2callback");
+
+    private AuthorizationService authService;
+    private AuthStateManager authStateManager;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        authStateManager = AuthStateManager.getInstance(this);
+        authService = new AuthorizationService(this);
+
+        AuthorizationServiceConfiguration config =
+            new AuthorizationServiceConfiguration(Uri.parse(AUTH_ENDPOINT), Uri.parse(TOKEN_ENDPOINT));
+
+        AuthorizationRequest request = new AuthorizationRequest.Builder(
+            config,
+            CLIENT_ID,
+            ResponseTypeValues.CODE,
+            REDIRECT_URI
+        ).setScope("openid profile email").build();
+
+        Intent authIntent = authService.getAuthorizationRequestIntent(request);
+        startActivityForResult(authIntent, 1001);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        if (requestCode == 1001) {
+            AuthorizationResponse resp = AuthorizationResponse.fromIntent(data);
+            AuthorizationException ex = AuthorizationException.fromIntent(data);
+
+            if (resp != null) {
+                authStateManager.updateAfterAuthorization(resp, ex);
+                exchangeToken(resp);
+            } else {
+                Log.e("AppAuth", "Authorization failed", ex);
+            }
+        }
+    }
+
+    private void exchangeToken(AuthorizationResponse response) {
+        authService.performTokenRequest(
+            response.createTokenExchangeRequest(),
+            (tokenResponse, ex) -> {
+                if (tokenResponse != null) {
+                    authStateManager.updateAfterTokenResponse(tokenResponse, ex);
+                    startActivity(new Intent(this, TokenActivity.class));
+                    finish();
+                } else {
+                    Log.e("AppAuth", "Token exchange failed", ex);
+                }
+            }
+        );
+    }
+}
+
+
+---
+
+✅ TokenActivity.java
+
+Use your tokens:
+
+public class TokenActivity extends AppCompatActivity {
+    private AuthStateManager authStateManager;
+    private AuthorizationService authService;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_token);
+
+        authService = new AuthorizationService(this);
+        authStateManager = AuthStateManager.getInstance(this);
+
+        AuthState state = authStateManager.getCurrent();
+
+        state.performActionWithFreshTokens(authService, (accessToken, idToken, ex) -> {
+            if (ex != null) {
+                Log.e("AppAuth", "Token refresh failed", ex);
+                return;
+            }
+
+            TextView tokenView = findViewById(R.id.tokenInfo);
+            tokenView.setText("Access Token:\n" + accessToken + "\n\nID Token:\n" + idToken);
+        });
+    }
+}
+
+
+---
+
+✅ LogoutActivity.java
+
+Handle logout:
+
+public class LogoutActivity extends AppCompatActivity {
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        AuthStateManager authStateManager = AuthStateManager.getInstance(this);
+        AuthorizationServiceConfiguration config = authStateManager.getCurrent().getAuthorizationServiceConfiguration();
+        String idToken = authStateManager.getCurrent().getIdToken();
+
+        Uri postLogoutRedirectUri = Uri.parse("com.example.app:/logout");
+
+        EndSessionRequest request = new EndSessionRequest.Builder(config)
+            .setIdTokenHint(idToken)
+            .setPostLogoutRedirectUri(postLogoutRedirectUri)
+            .build();
+
+        AuthorizationService service = new AuthorizationService(this);
+        Intent intent = service.getEndSessionRequestIntent(request);
+        startActivity(intent);
+    }
+}
+
+
+---
+
+✅ AuthStateManager.java
+
+public class AuthStateManager {
+    private static final String AUTH_STATE = "AUTH_STATE";
+    private static AuthStateManager instance;
+    private final SharedPreferences prefs;
+    private AuthState current;
+
+    public static AuthStateManager getInstance(Context context) {
+        if (instance == null) {
+            instance = new AuthStateManager(context);
+        }
+        return instance;
+    }
+
+    private AuthStateManager(Context context) {
+        prefs = context.getSharedPreferences("auth", Context.MODE_PRIVATE);
+        String stateJson = prefs.getString(AUTH_STATE, null);
+        if (stateJson != null) {
+            try {
+                current = AuthState.jsonDeserialize(stateJson);
+            } catch (JSONException e) {
+                current = new AuthState();
+            }
+        } else {
+            current = new AuthState();
+        }
+    }
+
+    public void updateAfterAuthorization(AuthorizationResponse resp, AuthorizationException ex) {
+        current.update(resp, ex);
+        persist();
+    }
+
+    public void updateAfterTokenResponse(TokenResponse resp, AuthorizationException ex) {
+        current.update(resp, ex);
+        persist();
+    }
+
+    public AuthState getCurrent() {
+        return current;
+    }
+
+    private void persist() {
+        prefs.edit().putString(AUTH_STATE, current.jsonSerializeString()).apply();
+    }
+}
+
+
+---
+
+✅ Optional: Custom Tab Browser Control
+
+Force Chrome or Samsung browser only:
+
+AppAuthConfiguration config = new AppAuthConfiguration.Builder()
+    .setBrowserMatcher(new BrowserAllowList(
+        VersionedBrowserMatcher.CHROME_CUSTOM_TAB,
+        VersionedBrowserMatcher.SAMSUNG_CUSTOM_TAB
+    )).build();
+
+AuthorizationService authService = new AuthorizationService(context, config);
+
+
+---
+
+🧪 Demo App / PDF / GitHub
+
+Would you like me to:
+
+Bundle this into a GitHub repo?
+
+Generate a ZIP project ready for Android Studio?
+
+Create a PDF codex explaining the logic + screenshots?
+
+
+Just say the word, Commander Panther 🐾👑.
+
