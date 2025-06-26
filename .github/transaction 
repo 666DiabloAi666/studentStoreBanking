@@ -1,0 +1,22 @@
+// server.js or paymentHandler.js
+
+const stripe = require('stripe')('sk_test_YOUR_SECRET_KEY');
+
+async function createCharge(token, amount, currency = 'usd') {
+  try {
+    const charge = await stripe.charges.create({
+      amount,
+      currency,
+      source: token,
+      description: 'Pizza Hut 78228 - 2 Large Pizzas, Pan Crust, Extra Cheese & Pepperoni',
+      receipt_email: 'customer@example.com',
+    });
+
+    // Save charge.id, status, and details to your DB here for record-keeping
+
+    return charge;
+  } catch (error) {
+    console.error('Stripe charge failed:', error);
+    throw error;
+  }
+}
